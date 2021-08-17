@@ -16,7 +16,7 @@ import std / [os, streams, options, strformat, json, sequtils, parseutils, strut
 import ./ rxnim / rxnim
 import segfaults
 from std/times import Time, parseTime, utc, `<`, now, `$`
-import zippy
+import zippy, jsony
 from httprequest import Request
 import ../ scorpermacros
 
@@ -564,6 +564,28 @@ proc json*(req: ImpRequest): Future[JsonNode] {.async.} =
     return result
   try:
     result = parseJson(str)
+  except CatchableError as e:
+    raise newHttpError(Http400, e.msg)
+  except Exception as e:
+    raise newHttpError(Http400, e.msg)
+  req.parsedJson = some(result)
+  req.parsed = true
+
+proc obj*[T](req: ImpRequest, x: typedesc[T]): Future[T] {.async.} =
+  if req.parsedJson.isSome:
+    return req.parsedJson.unSafeGet
+  var str: string
+  result = "{}".fromJson(T)
+  try:
+    str = await req.reader.readLine(limit = req.contentLength.int)
+  except AsyncStreamIncompleteError as e:
+    await req.respStatus(Http400, ContentLengthMismatch)
+    result = "{}".fromJson(T)
+    req.parsedJson = some(result)
+    req.parsed = true
+    return result
+  try:
+    result = str.fromJson(T)
   except CatchableError as e:
     raise newHttpError(Http400, e.msg)
   except Exception as e:
